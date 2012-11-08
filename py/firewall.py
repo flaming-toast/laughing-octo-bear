@@ -30,14 +30,13 @@ class Firewall (object):
     You can alter what happens with the connection by altering the
     action property of the event.
     """
-    """if self.banned_ports[flow.dstport] == True:
+    if self.banned_ports[flow.dstport] == True:
         log.debug("Banned Ports- packet dropped")
-        event.action.deny = True""'
+        event.action.deny = True
     
     
     
     log.debug("Allowed connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
-    event.action.forward = True
   def _handle_DeferredConnectionIn (self, event, flow, packet):
     """
     Deferred connection event handler.
