@@ -1,7 +1,7 @@
 from pox.core import core
 from pox.lib.addresses import * 
 from pox.lib.packet import *
-
+import fileinput
 # Get a logger
 log = core.getLogger("fw")
 
@@ -12,12 +12,16 @@ class Firewall (object):
   Don't change the name or anything -- the eecore component
   expects it to be firewall.Firewall.
   """
-  
   def __init__(self):
     """
     Constructor.
     Put your initialization code here.
     """
+    self.banned_ports = {}
+    for line in fileinput.input('/root/pox/ext/banned-ports.txt'):
+      portNumber = int(line)
+      self.banned_ports[portNumber] = True
+    
     log.debug("Firewall initialized.")
 
   def _handle_ConnectionIn (self, event, flow, packet):
@@ -26,6 +30,7 @@ class Firewall (object):
     You can alter what happens with the connection by altering the
     action property of the event.
     """
+    
     log.debug("Allowed connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
     event.action.forward = True
 
