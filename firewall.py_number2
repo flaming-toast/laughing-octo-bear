@@ -6,6 +6,15 @@ import re
 # Get a logger
 log = core.getLogger("fw")
 
+
+"""
+For number 3: 
+calculate the number of characters for the longest search string. This will be our "block size" 
+For every block, match all strings against the block and add the corresponding counts
+After that, discard the block and read in the next "block size" 
+Continue until the connection closes.
+"""
+
 class Firewall (object):
   """
   Firewall class.
