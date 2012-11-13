@@ -28,6 +28,12 @@ class Firewall (object):
         domain = str(line.rstrip()) # Return a copy of the string with trailing characters removed. 
         log.debug(domain)
         self.banned_domains.add(domain)
+    for line in fileinput.input('/root/pox/ext/monitored-strings.txt'):
+        temp = str(line.rstrip())
+        address, search_string = temp.split(':')
+        
+        
+        
         
     log.debug("Firewall initialized.")
     
@@ -72,7 +78,8 @@ class Firewall (object):
     if forward:
         event.action.forward = True
     else:
-        event.action.forward = False
+        log.debug("Denied Connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
+        event.action.deny = True
     
     
   def _handle_MonitorData (self, event, packet, reverse):
