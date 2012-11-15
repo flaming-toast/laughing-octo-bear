@@ -3,6 +3,7 @@ from pox.lib.addresses import *
 from pox.lib.packet import *
 import fileinput
 import re
+from pox.lib.recoco.recoco import *
 # Get a logger
 log = core.getLogger("fw")
 
@@ -28,7 +29,7 @@ class Firewall (object):
         domain = str(line.rstrip()) # Return a copy of the string with trailing characters removed. 
         log.debug(domain)
         self.banned_domains.add(domain)
-    self.monitered_strings = set()
+    self.monitered_strings = set() # (address, search_string)
     for line in fileinput.input('/root/pox/ext/monitored-strings.txt'):
         temp = str(line.rstrip())
         address, search_string = temp.split(':')
@@ -36,9 +37,9 @@ class Firewall (object):
         search_string = str(search_string)
         log.debug(address + ':' + search_string)
         self.monitered_strings.add((address, search_string))
-    self.counts = dict() # key: (address, search_string, port), value: number of times the search_string appears
-    self.countsIncomingbuffer = dict() # key: (address, port), value: string (initialized to empty string) 
-    self.countsOutgoingbuffer = dict() # key: (address, port), value: string (initialized to empty string)
+    self.counts = dict() # key: (address, search_string, dstport), value: number of times the search_string appears
+    self.countsIncomingbuffer = dict() # key: (address, srcport, dstport), value: string (initialized to empty string) 
+    self.countsOutgoingbuffer = dict() # key: (address, srcport, dstport), value: string (initialized to empty string)
     self.countsBuffetSize = dict() # key: address, value: len(LongestString) -1
     log.debug("Firewall initialized.")
     
@@ -66,6 +67,8 @@ class Firewall (object):
             if len(search_string)>longestString:
                 longestString = len(search_string)
                 self.countsBuffetSize[address] = longestString -1
+            self.countsIncomingbuffer[(address, int(flow.srcport), int(flow.dstport))] = ""
+            self.countsOutgoingbuffer[(address, int(flow.srcport), int(flow.dstport))] = ""
             forward = False
             
     if forward:
@@ -75,7 +78,7 @@ class Firewall (object):
     else:
         log.debug("Deferred connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         event.action.defer = True
-            
+        
     
         
         
@@ -88,16 +91,8 @@ class Firewall (object):
     handler will be called when the first actual payload data
     comes across the connection.
     """
-    """ check for monitored string data here"""
-    for monitored_address, search_string in self.monitered_strings:
-        if flow.dst == monitored_address:
-            log.debug("Monitored outgoing connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
-            event.action.monitor_forward = True
-            return
-        if flow.src == monitored_address:
-            log.debug("Monitored incoming connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
-            event.action.monitor_backward = True
-            return
+
+    
     """ check for banned_domains here"""
     forward = True
     log.debug("handle deferred connection")
@@ -111,10 +106,15 @@ class Firewall (object):
             log.debug(host[0])
             forward = False 
     if forward:
-        log.debug("Allowed Connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
+        log.debug("Allowed Connection2 [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
+        for monitored_address, search_string in self.monitered_strings:
+            if str(flow.dst) == monitored_address:
+                log.debug(str(flow.dst))
+                event.action.monitor_forward = True
+                event.action.monitor_backward = True
         event.action.forward = True
     else:
-        log.debug("Denied Connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
+        log.debug("Denied Connection2 [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         event.action.deny = True
     
     
@@ -125,10 +125,57 @@ class Firewall (object):
     has been enabled by a prior event handler.
     """
     """ for every port in every pair of src_destination, we need a buffer for income and another for outgoing"""
-    if reverse:
+    
+    # timer = Timer(10, writeToFile, "hello")
+    
+    srcport = packet.payload.payload.srcport # srcport in TCP Header
+    dstport = packet.payload.payload.dstport # dstport in TCP Header
+    srcport = int(srcport)
+    dstport = int(dstport)
+    srcip = packet.payload.srcip 
+    srcip = str(srcip)
+    dstip = packet.payload.dstip
+    dstip = str(dstip)
+    data = str(packet.payload.payload.payload)
+    
+    if reverse: # for incoming packet/data
+        buffered = str(self.countsIncomingbuffer[(srcip, srcport, dstport)])
+        data = buffered + data
+        for ip, search_string in self.monitered_strings:
+            if ip == srcip:
+                number = data.find(search_string)
+                self.counts[(ip, search_string, srcport)] += number
+        for ip, search_string in self.monitered_strings:
+            if ip == srcip:
+                number = buffered.find(search_string)
+                self.counts[(ip, search_string, srcport)] -= number
+        bufferLength = self.countsBuffetSize[srcip]
+        bufferedData = data[len(data)-bufferLength:len(data)]
+        self.countsIncomingbuffer[(srcip, srcport, dstport)] = bufferedData
+    else: # for outgoing packet/data
+        buffered = str(self.countsOutgoingbuffer[(dstip, srcport, dstport)])
+        data = buffered + data
+        for ip, search_string in self.monitered_strings:
+            if ip == srcip:
+                number = data.find(search_string)
+                self.counts[(ip, search_string, dstport)] += number
+        for ip, search_string in self.monitered_strings:
+            if ip == srcip:
+                number = buffered.find(search_string)
+                self.counts[(ip, search_string, dstport)] -= number
+        bufferLength = self.countsBuffetSize[dstip]
+        bufferedData = data[len(data)-bufferLength:len(data)]
+        self.countsOutgoingbuffer[(dstip, srcport, dstport)] = bufferedData
+
+
+    
+    
+    def writeToFile(message):
+        log.debug("Timer is off!!!!!")
         
+        pass
+    
         
     
     
-    
-    pass
+
