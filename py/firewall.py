@@ -37,12 +37,14 @@ class Firewall (object):
         search_string = str(search_string)
         log.debug(address + ':' + search_string)
         self.monitered_strings.add((address, search_string))
-    self.counts = dict() # key: (address, search_string, dstport), value: number of times the search_string appears
+    self.counts = dict() # key: (address, search_string, srcport, dstport), value: number of times the search_string appears
     self.countsIncomingbuffer = dict() # key: (address, srcport, dstport), value: string (initialized to empty string) 
     self.countsOutgoingbuffer = dict() # key: (address, srcport, dstport), value: string (initialized to empty string)
     self.countsBuffetSize = dict() # key: address, value: len(LongestString) -1
-    self.timers = dict() # a timer for each TCP connection. key: (address, dstport) Value: Timers (initialized to 30.0 seconds)
+    self.timers = dict() # a timer for each TCP connection. key: (address, srcport, dstport) Value: Timers (initialized to 30.0 seconds)
+    self.timersStatus = dict() # a status of timer for each TCP connection key: same as above Value: True when timer is on, false otherwise
     log.debug("Firewall initialized.")
+    self.timerInitiated = 0
     
   def _handle_ConnectionIn (self, event, flow, packet):
     """
@@ -50,6 +52,7 @@ class Firewall (object):
     You can alter what happens with the connection by altering the
     action property of the event.
     """
+    
     if flow.dstport in self.banned_ports:
         log.debug("Denied Connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         event.action.deny = True
@@ -57,22 +60,25 @@ class Firewall (object):
     forward = True
     dst_address = str(flow.dst) # the IP Address for destination
     longestString = 0
-    """ cancel the timer if timer exists on this address/port"""
-    """if self.timers[(dst_address, int(flow.dstport))] != None:
-        self.timers[(dst_address, int(flow.dstport))].cancel()"""
+    """ cancel the timer if timer exists on this address, srcport, dstport (this is when disconnect occurs and hasn't been timed out yet"""
+    if (dst_address, int(flow.srcport), int(flow.dstport)) in self.timersStatus.keys():
+        if self.timersStatus[(dst_address, int(flow.srcport), int(flow.dstport))]:
+            self.timers[(dst_address, int(flow.srcport), int(flow.dstport))].cancel()
+            self.writeToFile(dst_address, int(flow.srcport), int(flow.dstport)) 
+    
     for address, search_string in self.monitered_strings:
         if dst_address == address:
             log.debug(address + ':' + search_string + ":" + str(flow.dstport))
-            self.counts[(address, search_string, int(flow.dstport))] = 0
+            self.counts[(address, search_string, int(flow.srcport), int(flow.dstport))] = 0
             if len(search_string)>longestString:
                 longestString = len(search_string)
                 self.countsBuffetSize[address] = longestString -1
             log.debug("1." + address + ":" + str(flow.dstport) + ":" + str(flow.srcport))
-            self.countsIncomingbuffer[(address, int(flow.dstport), int(flow.srcport))] = ""
-            self.countsOutgoingbuffer[(address, int(flow.srcport), int(flow.dstport))] = ""
+            self.countsIncomingbuffer[(address, int(flow.dstport), int(flow.srcport))] = "" # set incoming buffer and outgoing buffer to empty string
+            self.countsOutgoingbuffer[(address, int(flow.srcport), int(flow.dstport))] = "" 
             log.debug("2." + address + ":" + str(flow.dstport) + ":" + str(flow.srcport))
             forward = False
-    
+    log.debug("Longest string is" + str(longestString))
     if forward:
         if flow.dstport == 80:
             log.debug("Deferred connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
@@ -83,15 +89,10 @@ class Firewall (object):
         return
     else:
         """ initiate timer on this address/port again"""
+        self.timers[(dst_address, int(flow.srcport), int(flow.dstport))] = Timer(30.0, self.writeToFile, args=(dst_address, int(flow.srcport), int(flow.dstport)))
         log.debug("timer started...")
-        if (dst_address, int(flow.dstport)) not in self.timers.keys():
-            log.debug("timer started here")
-            self.timers[(dst_address, int(flow.dstport))] = Timer(30.0, self.writeToFile, args=(str(flow.dst), int(flow.dstport)))
-        else:
-            log.debug("timer cancelled")
-            self.timers[(dst_address, int(flow.dstport))].cancel()
-            self.timers[(dst_address, int(flow.dstport))] = Timer(30.0, self.writeToFile, args=(str(flow.dst), int(flow.dstport)))
-
+        self.timerInitiated += 1
+        self.timersStatus[(dst_address, int(flow.srcport), int(flow.dstport))] = True
         log.debug("Deferred monitored connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         event.action.defer = True
         
@@ -157,29 +158,35 @@ class Firewall (object):
     #log.debug(str(srcport) + " : " + str(dstport) + " : " + srcip + " : " + dstip)
     if reverse: # for incoming packet/data
         """ shut off the timer first"""
-        self.timers[(srcip, srcport)].cancel()
+        if not self.timersStatus[(srcip, dstport, srcport)]:
+            log.debug("reverse-Timed Out already!!!, should already be writing to file/this connection is closed- please re-establish connection again...")
+            return
+        self.timers[(srcip, dstport, srcport)].cancel()
         buffered = str(self.countsIncomingbuffer[(srcip, srcport, dstport)])
         data = buffered + data
         log.debug("transfered back to :" + str(dstport))
         for ip, search_string in self.monitered_strings:
             if ip == srcip:
                 number = data.count(search_string)
-                self.counts[(ip, search_string, srcport)] += number
+                self.counts[(ip, search_string, dstport, srcport)] += number
         for ip, search_string in self.monitered_strings:
             if ip == srcip:
                 number = buffered.count(search_string)
-                self.counts[(ip, search_string, srcport)] -= number
+                self.counts[(ip, search_string, dstport, srcport)] -= number
         bufferLength = self.countsBuffetSize[srcip]
         bufferedData = data[len(data)-bufferLength:len(data)]
         self.countsIncomingbuffer[(srcip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
         """ start up the timer again"""
-        self.timers[(srcip, srcport)] = Timer(30.0, self.writeToFile, args=(srcip, srcport))
+        self.timers[(srcip, dstport, srcport)] = Timer(30.0, self.writeToFile, args=(srcip, dstport, srcport))
 
         log.debug("successfully runned incoming")
     else: # for outgoing packet/data
         """ shut off the timer first"""
-        self.timers[(dstip, dstport)].cancel()
+        if not self.timersStatus[(srcip, dstport, srcport)]:
+            log.debug("Timed Out Already!!!, should already be writing to file/this connection is closed- please re-establish connection again...")
+            return
+        self.timers[(dstip, srcport, dstport)].cancel()
         buffered = str(self.countsOutgoingbuffer[(dstip, srcport, dstport)])
         data = buffered + data
         log.debug("transfered forward to :" + str(dstport))
@@ -187,35 +194,43 @@ class Firewall (object):
         for ip, search_string in self.monitered_strings:
             if ip == srcip:
                 number = data.count(search_string)
-                self.counts[(ip, search_string, dstport)] += number
+                self.counts[(ip, search_string, srcport, dstport)] += number
         for ip, search_string in self.monitered_strings:
             if ip == srcip:
                 number = buffered.count(search_string)
-                self.counts[(ip, search_string, dstport)] -= number
+                self.counts[(ip, search_string, srcport, dstport)] -= number
         bufferLength = self.countsBuffetSize[dstip]
         bufferedData = data[len(data)-bufferLength:len(data)]
         self.countsOutgoingbuffer[(dstip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
         """ start up the timer again """
-        self.timers[(dstip, dstport)] =  Timer(30.0, self.writeToFile, args=(dstip, dstport))
+        self.timers[(dstip, srcport, dstport)] =  Timer(30.0, self.writeToFile, args=(dstip, srcport, dstport))
         log.debug("successfully runned outgoing")
         
-  def writeToFile(self, address, dstport):
+  def writeToFile(self, address, srcport, dstport):
       """ time to write to file!!!!!! and the project should be done after this:)"""
       # open a counts.txt file
+      self.timerInitiated -=1
+      if self.timerInitiated < 0:
+          log.debug("Something went wrong during the connection!! please check your connection again...")
+          return
+      self.timersStatus[(address, srcport, dstport)] = False
       log.debug("timer if off!!!!!")
       fo = open('/root/pox/ext/counts.txt', 'a')
       search_set = set()
+      
       for ip_address, search_string in self.monitered_strings:
           if ip_address == address:
               search_set.add(search_string)
       for search_string in search_set:
-          count = self.counts[(address, search_string, dstport)]
+          count = self.counts[(address, search_string, srcport, dstport)]
           log.debug(search_string)
+          self.counts[(address, search_string, srcport, dstport)] = 0
           fo.write(str(address) + "," + str(dstport) + "," + search_string + "," + str(count) + "\n")
           fo.flush()
       fo.close()
       log.debug("done writing.....")
+      log.debug("timer initiated: " + str(self.timerInitiated))
     
         
     
