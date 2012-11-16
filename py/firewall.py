@@ -74,7 +74,7 @@ class Firewall (object):
             self.counts[(address, search_string, int(flow.srcport), int(flow.dstport))] = 0
             if len(search_string)>longestString:
                 longestString = len(search_string)
-                self.countsBuffetSize[address] = longestString-1
+                self.countsBuffetSize[address] = longestString
             log.debug("1." + address + ":" + str(flow.dstport) + ":" + str(flow.srcport))
             self.countsIncomingbuffer[(address, int(flow.dstport), int(flow.srcport))] = "" # set incoming buffer and outgoing buffer to empty string
             self.countsOutgoingbuffer[(address, int(flow.srcport), int(flow.dstport))] = "" 
@@ -178,7 +178,10 @@ class Firewall (object):
                 number = buffered.count(search_string)
                 self.counts[(ip, search_string, dstport, srcport)] -= number
         bufferLength = self.countsBuffetSize[srcip]
-        bufferedData = data[len(data)-bufferLength:len(data)]
+        if len(data) < bufferLength:
+            bufferedData = data
+        else:
+            bufferedData = data[len(data)-bufferLength:len(data)]
         self.countsIncomingbuffer[(srcip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
         """ start up the timer again"""
@@ -205,7 +208,10 @@ class Firewall (object):
                 self.counts[(dstip, search_string, srcport, dstport)] -= number
                 log.debug([dstip, search_string, srcport, dstport])
         bufferLength = self.countsBuffetSize[dstip]
-        bufferedData = data[len(data)-bufferLength:len(data)]
+        if len(data) < bufferLength:
+            bufferedData = data
+        else:
+            bufferedData = data[len(data)-bufferLength:len(data)]
         self.countsOutgoingbuffer[(dstip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
         
