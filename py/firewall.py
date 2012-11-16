@@ -1,7 +1,7 @@
 from pox.core import core
 from pox.lib.addresses import * 
 from pox.lib.packet import *
-from pox.lib.recoco.recoco import Timer
+from pox.lib.recoco.recoco import *
 import fileinput
 import re
 # Get a logger
@@ -58,8 +58,8 @@ class Firewall (object):
     dst_address = str(flow.dst) # the IP Address for destination
     longestString = 0
     """ cancel the timer if timer exists on this address/port"""
-    if self.timers[(dst_address, int(flow.dstport))] != None:
-        self.timers[(dst_address, int(flow.dstport))].cancel()
+    """if self.timers[(dst_address, int(flow.dstport))] != None:
+        self.timers[(dst_address, int(flow.dstport))].cancel()"""
     for address, search_string in self.monitered_strings:
         if dst_address == address:
             log.debug(address + ':' + search_string + ":" + str(flow.dstport))
@@ -71,7 +71,6 @@ class Firewall (object):
             self.countsIncomingbuffer[(address, int(flow.dstport), int(flow.srcport))] = ""
             self.countsOutgoingbuffer[(address, int(flow.srcport), int(flow.dstport))] = ""
             log.debug("2." + address + ":" + str(flow.dstport) + ":" + str(flow.srcport))
-            log.debug("Timer started at 30.0 seconds")
             forward = False
     
     if forward:
@@ -84,7 +83,15 @@ class Firewall (object):
         return
     else:
         """ initiate timer on this address/port again"""
-        self.timers[(dst_address, int(flow.dstport))] = Timer(30.0, self.writeToFile, args= (dst_address, int(flow.dstportd)))
+        log.debug("timer started...")
+        if (dst_address, int(flow.dstport)) not in self.timers.keys():
+            log.debug("timer started here")
+            self.timers[(dst_address, int(flow.dstport))] = Timer(30.0, self.writeToFile, args=(str(flow.dst), int(flow.dstport)))
+        else:
+            log.debug("timer cancelled")
+            self.timers[(dst_address, int(flow.dstport))].cancel()
+            self.timers[(dst_address, int(flow.dstport))] = Timer(30.0, self.writeToFile, args=(str(flow.dst), int(flow.dstport)))
+
         log.debug("Deferred monitored connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         event.action.defer = True
         
@@ -149,7 +156,6 @@ class Firewall (object):
     if reverse: # for incoming packet/data
         """ shut off the timer first"""
         self.timers[(srcip, srcport)].cancel()
-        
         buffered = str(self.countsIncomingbuffer[(srcip, srcport, dstport)])
         data = buffered + data
         log.debug("transfered back to :" + str(dstport))
@@ -166,13 +172,12 @@ class Firewall (object):
         self.countsIncomingbuffer[(srcip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
         """ start up the timer again"""
-        self.timers[(dstip, dstport)] = Timer(30.0, self.writeToFile, args= (srcip, srcport) )
-        
+        self.timers[(srcip, srcport)] = Timer(30.0, self.writeToFile, args=(srcip, srcport))
+
         log.debug("successfully runned incoming")
     else: # for outgoing packet/data
         """ shut off the timer first"""
         self.timers[(dstip, dstport)].cancel()
-        
         buffered = str(self.countsOutgoingbuffer[(dstip, srcport, dstport)])
         data = buffered + data
         log.debug("transfered forward to :" + str(dstport))
@@ -190,10 +195,10 @@ class Firewall (object):
         self.countsOutgoingbuffer[(dstip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
         """ start up the timer again """
-        self.timers[(dstip, dstport)] = Timer(30.0, self.writeToFile, args= (dstip, dstport) )
+        self.timers[(dstip, dstport)] =  Timer(30.0, self.writeToFile, args=(dstip, dstport))
         log.debug("successfully runned outgoing")
         
-  def writeToFile(self, message, address, dstport):
+  def writeToFile(self, address, dstport):
       """ time to write to file!!!!!! and the project should be done after this:)"""
       log.debug("Timer is off!!!!!")
       pass
