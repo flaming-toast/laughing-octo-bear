@@ -151,7 +151,9 @@ class Firewall (object):
     srcip = str(srcip)
     dstip = packet.payload.dstip
     dstip = str(dstip)
-    data = str(packet.payload.payload.payload)
+    data = packet.payload.payload.payload
+    log.debug(data)
+    
     #log.debug(str(srcport) + " : " + str(dstport) + " : " + srcip + " : " + dstip)
     if reverse: # for incoming packet/data
         """ shut off the timer first"""
@@ -200,8 +202,20 @@ class Firewall (object):
         
   def writeToFile(self, address, dstport):
       """ time to write to file!!!!!! and the project should be done after this:)"""
-      log.debug("Timer is off!!!!!")
-      pass
+      # open a counts.txt file
+      log.debug("timer if off!!!!!")
+      fo = open('/root/pox/ext/counts.txt', 'a')
+      search_set = set()
+      for ip_address, search_string in self.monitered_strings:
+          if ip_address == address:
+              search_set.add(search_string)
+      for search_string in search_set:
+          count = self.counts[(address, search_string, dstport)]
+          log.debug(search_string)
+          fo.write(str(address) + "," + str(dstport) + "," + search_string + "," + str(count) + "\n")
+          fo.flush()
+      fo.close()
+      log.debug("done writing.....")
     
         
     
