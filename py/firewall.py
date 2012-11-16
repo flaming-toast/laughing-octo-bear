@@ -19,6 +19,8 @@ class Firewall (object):
     Constructor.
     Put your initialization code here.
     """
+    self.debug = True
+    self.debug2 = True
     self.banned_ports = set()
     for line in fileinput.input('/root/pox/ext/banned-ports.txt'):
         portNumber = int(line.rstrip())
@@ -72,7 +74,7 @@ class Firewall (object):
             self.counts[(address, search_string, int(flow.srcport), int(flow.dstport))] = 0
             if len(search_string)>longestString:
                 longestString = len(search_string)
-                self.countsBuffetSize[address] = longestString -1
+                self.countsBuffetSize[address] = longestString-1
             log.debug("1." + address + ":" + str(flow.dstport) + ":" + str(flow.srcport))
             self.countsIncomingbuffer[(address, int(flow.dstport), int(flow.srcport))] = "" # set incoming buffer and outgoing buffer to empty string
             self.countsOutgoingbuffer[(address, int(flow.srcport), int(flow.dstport))] = "" 
@@ -153,8 +155,10 @@ class Firewall (object):
     dstip = packet.payload.dstip
     dstip = str(dstip)
     data = packet.payload.payload.payload
-    log.debug(data)
-    
+    #log.debug(data)
+    if self.debug:
+        log.debug(data)
+        self.debug =False
     #log.debug(str(srcport) + " : " + str(dstport) + " : " + srcip + " : " + dstip)
     if reverse: # for incoming packet/data
         """ shut off the timer first"""
@@ -183,7 +187,7 @@ class Firewall (object):
         log.debug("successfully runned incoming")
     else: # for outgoing packet/data
         """ shut off the timer first"""
-        if not self.timersStatus[(srcip, srcport, dstport)]:
+        if not self.timersStatus[(dstip, srcport, dstport)]:
             log.debug("Timed Out Already!!!, should already be writing to file/this connection is closed- please re-establish connection again...")
             return
         self.timers[(dstip, srcport, dstport)].cancel()
@@ -192,17 +196,20 @@ class Firewall (object):
         log.debug("transfered forward to :" + str(dstport))
 
         for ip, search_string in self.monitered_strings:
-            if ip == srcip:
+            if ip == dstip:
                 number = data.count(search_string)
-                self.counts[(ip, search_string, srcport, dstport)] += number
+                self.counts[(dstip, search_string, srcport, dstport)] += number
         for ip, search_string in self.monitered_strings:
-            if ip == srcip:
+            if ip == dstip:
                 number = buffered.count(search_string)
-                self.counts[(ip, search_string, srcport, dstport)] -= number
+                self.counts[(dstip, search_string, srcport, dstport)] -= number
+                log.debug([dstip, search_string, srcport, dstport])
         bufferLength = self.countsBuffetSize[dstip]
         bufferedData = data[len(data)-bufferLength:len(data)]
         self.countsOutgoingbuffer[(dstip, srcport, dstport)] = bufferedData
         data = "" # save space/memory
+        
+            
         """ start up the timer again """
         self.timers[(dstip, srcport, dstport)] =  Timer(30.0, self.writeToFile, args=(dstip, srcport, dstport))
         log.debug("successfully runned outgoing")
