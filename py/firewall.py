@@ -123,7 +123,7 @@ class Firewall (object):
             log.debug(host[0])
             forward = False 
     if forward:
-        #log.debug("Allowed Connection2 [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
+        log.debug("Allowed Connection2 [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         for monitored_address, search_string in self.monitered_strings:
             if str(flow.dst) == monitored_address:
                 log.debug("MoniteredConnection")
@@ -131,7 +131,7 @@ class Firewall (object):
                 event.action.monitor_backward = True
         event.action.forward = True
     else:
-        #log.debug("Denied Connection2 [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
+        log.debug("Denied Connection2 [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
         event.action.deny = True
     
     
@@ -183,7 +183,7 @@ class Firewall (object):
         log.debug("successfully runned incoming")
     else: # for outgoing packet/data
         """ shut off the timer first"""
-        if not self.timersStatus[(srcip, dstport, srcport)]:
+        if not self.timersStatus[(srcip, srcport, dstport)]:
             log.debug("Timed Out Already!!!, should already be writing to file/this connection is closed- please re-establish connection again...")
             return
         self.timers[(dstip, srcport, dstport)].cancel()
@@ -210,6 +210,10 @@ class Firewall (object):
   def writeToFile(self, address, srcport, dstport):
       """ time to write to file!!!!!! and the project should be done after this:)"""
       # open a counts.txt file
+      """ clean the buffer"""
+      self.countsIncomingbuffer[(address, dstport, srcport)] = ""
+      self.countsOutgoingbuffer[(address, srcport, dstport)] = ""
+      
       self.timerInitiated -=1
       if self.timerInitiated < 0:
           log.debug("Something went wrong during the connection!! please check your connection again...")
