@@ -155,7 +155,6 @@ class Firewall (object):
     dstip = packet.payload.dstip
     dstip = str(dstip)
     data = packet.payload.payload.payload
-    #log.debug(data)
     if self.debug:
         log.debug(data)
         self.debug =False
@@ -193,6 +192,7 @@ class Firewall (object):
         if not self.timersStatus[(dstip, srcport, dstport)]:
             log.debug("Timed Out Already!!!, should already be writing to file/this connection is closed- please re-establish connection again...")
             return
+        log.debug(data)
         self.timers[(dstip, srcport, dstport)].cancel()
         buffered = str(self.countsOutgoingbuffer[(dstip, srcport, dstport)])
         data = buffered + data
