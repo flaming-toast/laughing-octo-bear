@@ -2,6 +2,7 @@ from pox.core import core
 from pox.lib.addresses import * 
 from pox.lib.packet import *
 import fileinput
+import re
 # Get a logger
 log = core.getLogger("fw")
 
@@ -62,7 +63,7 @@ class Firewall (object):
     dstip = str(dstip)
     data = str(packet.payload.payload.payload)
     if srcport == 21:
-        if "229" in data:
+        if "229" in data[:3]:
             temp = data.split(" ")
             temp1 = temp[5].split("|")
             port = int(temp1[3])
@@ -75,6 +76,13 @@ class Firewall (object):
                 self.ftpAddress[srcip].append(port)
                 # set timer
             log.debug(self.ftpAddress)
+	if "227" in data[:3]:
+		p = re.compile('\d+')
+		octet1 = p.findall(data)[5]
+		octet2 = p.findall(data)[6]
+		portnum = int(octet1)*256 + int(octet2)
+		log.debug(str(portnum))
+	   
         
             
             
