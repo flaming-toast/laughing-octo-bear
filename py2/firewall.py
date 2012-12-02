@@ -1,6 +1,7 @@
 from pox.core import core
 from pox.lib.addresses import * 
 from pox.lib.packet import *
+from pox.lib.recoco.recoco import *
 import fileinput
 import re
 # Get a logger
@@ -18,7 +19,8 @@ class Firewall (object):
     Constructor.
     Put your initialization code here.
     """
-    self.ftpAddress = {}
+    self.ftpAddress = {} # Key: Destaddress, Value: List of allowed ports
+    self.timers = {} # key: (Destaddress, dataPorts), Value: Timer
     log.debug("Firewall initialized.")
 
   def _handle_ConnectionIn (self, event, flow, packet):
@@ -30,7 +32,6 @@ class Firewall (object):
     if int(flow.dstport) >= 0 and int(flow.dstport) <= 1023:
       if int(flow.dstport) == 21:
           log.debug("ftp connection")
-          event.action.monitor_forward = True
           event.action.monitor_backward = True
           return
       log.debug("Allowed connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
@@ -38,8 +39,12 @@ class Firewall (object):
     else:
         if self.ftpAddress.has_key(str(flow.dst)):
             if int(flow.dstport) in self.ftpAddress[str(flow.dst)]:
-                # set timer
-                event.action.forward = True
+                log.debug("connection to dataport established")
+                self.setTimer(str(flow.dst), int(flow.dstport))
+                event.action.monitor_backward = True
+                event.action.monitor_forward = True
+                return
+        event.action.deny = True
         
 
   def _handle_DeferredConnectionIn (self, event, flow, packet):
@@ -74,11 +79,11 @@ class Firewall (object):
             if self.ftpAddress.has_key(srcip):
                 if port not in self.ftpAddress[srcip]:
                     self.ftpAddress[srcip].append(port)
-                # set timer
+                self.setTimer(srcip, port)
             else:
                 self.ftpAddress[srcip] = []
                 self.ftpAddress[srcip].append(port)
-                # set timer
+                self.setTimer(srcip, port)
             log.debug(self.ftpAddress)
         if "227" in data[:3]:
             p = re.compile('\d+')
@@ -88,15 +93,52 @@ class Firewall (object):
             if self.ftpAddress.has_key(srcip):
                 if portnum not in self.ftpAddress[srcip]:
                     self.ftpAddress[srcip].append(portnum)
-                # set timer
+                self.setTimer(srcip, portnum)
             else:
                 self.ftpAddress[srcip] = []
                 self.ftpAddress[srcip].append(portnum)
-                # set timer
+                self.setTimer(srcip, portnum)
             log.debug(self.ftpAddress)    
-            
-            
+        event.action.forward = True
+    else:
+        if reverse:
+            if self.ftpAddress.has_key(srcip):
+                if srcport in self.ftpAddress[srcip]:  
+                    self.setTimer(srcip, srcport)
+                    event.action.forward = True
+                    return
+            log.debug("transfer denied-timedout already")
+            event.action.deny= True
+        else:
+            if self.ftpAddress.has_key(dstip):
+                if dstport in self.ftpAddress[dstip]:    
+                    self.setTimer(dstip, dstport)
+                    event.action.forward = True
+                    return
+            log.debug("Transfer denied- timedout already")
+            event.action.deny = True
     
     #log.debug("Monitored connection [" + srcip + ":"+ str(srcport) + "," + dstip + ":" + str(dstport))
-    event.action.forward = True
-    pass
+    
+    
+    
+  def setTimer(self, destAddress, dataPorts):
+     if self.timers.has_key((destAddress, dataPorts)):
+         self.timers[(destAddress, dataPorts)].cancel()
+         self.timers[(destAddress, dataPorts)] = Timer(10.0, self.timeoutFunc, args=(destAddress, dataPorts))
+     else:
+         self.timers[(destAddress, dataPorts)] = Timer(10.0, self.timeoutFunc, args=(destAddress, dataPorts))\
+         
+
+  def timeoutFunc(self, destAddress, dataPorts):
+     if self.timers.has_key((destAddress, dataPorts)):
+         del self.timers[(destAddress, dataPorts)]
+     if self.ftpAddress.has_key(destAddress):
+         if dataPorts in self.ftpAddress[destAddress]:
+             log.debug(self.ftpAddress)
+             self.ftpAddress[destAddress].remove(dataPorts)
+             log.debug(self.ftpAddress)
+     log.debug("Timed-out!")
+     
+     
+
