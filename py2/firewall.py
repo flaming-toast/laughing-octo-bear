@@ -28,15 +28,19 @@ class Firewall (object):
     action property of the event.
     """
     if int(flow.dstport) >= 0 and int(flow.dstport) <= 1023:
+      if int(flow.dstport) == 21:
+          log.debug("ftp connection")
+          event.action.monitor_forward = True
+          event.action.monitor_backward = True
+          return
+      log.debug("Allowed connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
       event.action.forward = True
-    if int(flow.dstport) == 21:
-      log.debug("ftp connection")
-      event.action.monitor_forward = True
-      event.action.monitor_backward = True
-      return
-    
-    log.debug("Allowed connection [" + str(flow.src) + ":" + str(flow.srcport) + "," + str(flow.dst) + ":" + str(flow.dstport) + "]" )
-    event.action.forward = True
+    else:
+        if self.ftpAddress.has_key(str(flow.dst)):
+            if int(flow.dstport) in self.ftpAddress[str(flow.dst)]:
+                # set timer
+                event.action.forward = True
+        
 
   def _handle_DeferredConnectionIn (self, event, flow, packet):
     """
@@ -76,14 +80,20 @@ class Firewall (object):
                 self.ftpAddress[srcip].append(port)
                 # set timer
             log.debug(self.ftpAddress)
-	if "227" in data[:3]:
-		p = re.compile('\d+')
-		octet1 = p.findall(data)[5]
-		octet2 = p.findall(data)[6]
-		portnum = int(octet1)*256 + int(octet2)
-		log.debug(str(portnum))
-	   
-        
+        if "227" in data[:3]:
+            p = re.compile('\d+')
+            octet1 = p.findall(data)[5]
+            octet2 = p.findall(data)[6]
+            portnum = int(octet1)*256 + int(octet2)
+            if self.ftpAddress.has_key(srcip):
+                if portnum not in self.ftpAddress[srcip]:
+                    self.ftpAddress[srcip].append(portnum)
+                # set timer
+            else:
+                self.ftpAddress[srcip] = []
+                self.ftpAddress[srcip].append(portnum)
+                # set timer
+            log.debug(self.ftpAddress)    
             
             
     
