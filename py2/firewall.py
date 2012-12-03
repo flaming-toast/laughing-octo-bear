@@ -73,9 +73,9 @@ class Firewall (object):
     data = str(packet.payload.payload.payload)
     if srcport == 21:
         if "229" in data[:3]:
-            temp = data.split(" ")
-            temp1 = temp[5].split("|")
-            port = int(temp1[3])
+            p = re.compile('\d+')
+            numbers = p.findall(data)
+            port = int(numbers[len(numbers)-1])
             if self.ftpAddress.has_key(srcip):
                 if port not in self.ftpAddress[srcip]:
                     self.ftpAddress[srcip].append(port)
@@ -87,9 +87,12 @@ class Firewall (object):
             log.debug(self.ftpAddress)
         if "227" in data[:3]:
             p = re.compile('\d+')
-            octet1 = p.findall(data)[5]
-            octet2 = p.findall(data)[6]
+            numbers = p.findall(data)
+            log.debug(numbers)
+            octet1 = p.findall(data)[-2]
+            octet2 = p.findall(data)[-1]
             portnum = int(octet1)*256 + int(octet2)
+            log.debug(portnum)
             if self.ftpAddress.has_key(srcip):
                 if portnum not in self.ftpAddress[srcip]:
                     self.ftpAddress[srcip].append(portnum)
