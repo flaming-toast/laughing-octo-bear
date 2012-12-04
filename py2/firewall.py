@@ -22,6 +22,8 @@ class Firewall (object):
     self.ftpAddress = {} # Key: Destaddress, Value: List of allowed ports
     self.timers = {} # key: (Destaddress, dataPorts), Value: Timer
     log.debug("Firewall initialized.")
+    self.packet_string = "" # find FTP response code 227 or 229
+
   def _handle_ConnectionIn (self, event, flow, packet):
     """
     New connection event handler.
@@ -73,7 +75,24 @@ class Firewall (object):
     dstip = packet.payload.dstip
     dstip = str(dstip)
     data = str(packet.payload.payload.payload)
-    
+   
+# process packets and find 227/229 response, account for fragmented packets.
+    match = re.match('\s*(22[79])\s*', data) # search the packet. If there's 227 or 229 we are interested in it.
+    if match: 
+	self.response = match.group() # save captured response code
+	log.debug("FOUND RESPONSE: " + self.response)
+	self.search_flag = True
+	self.packet_string += data # dump the packet into the temporary string
+	# inspect the temporary string, find the newlines
+
+    if (self.search_flag): 
+	if (re.search('[\r\n]*', data[data.find(self.response):])):
+		log.debug("PACKET STRING: " + self.packet_string) 
+		self.packet_string = "" # reset the string
+		self.search_flag = False
+        else: # we didn't find the newline after the response code, keep appending
+		self.packet_string += data
+		
     if srcport == 21:
         if "229" in data[:3]:
             log.debug(data)
@@ -103,7 +122,7 @@ class Firewall (object):
             self.setTimer(srcip, portnum)
             log.debug(self.ftpAddress)
             log.debug("227 successful")
-
+	
     event.action.forward = True
     #log.debug("Monitored connection [" + srcip + ":"+ str(srcport) + "," + dstip + ":" + str(dstport))
     
