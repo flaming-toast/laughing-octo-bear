@@ -39,10 +39,12 @@ class Firewall (object):
         if self.ftpAddress.has_key(str(flow.dst)):
             if int(flow.dstport) in self.ftpAddress[str(flow.dst)]:
                 if self.timers.has_key((str(flow.dst), int(flow.dstport))):
+                    self.timers[(str(flow.dst), int(flow.dstport))].cancel()
                     del self.timers[(str(flow.dst), int(flow.dstport))]
                 self.ftpAddress[str(flow.dst)].remove(int(flow.dstport))
                 event.action.forward = True
                 log.debug("ftp data connection established on port: " + str(flow.dstport))
+                log.debug(self.ftpAddress)
                 return
         event.action.deny = True
         
@@ -74,6 +76,7 @@ class Firewall (object):
     
     if srcport == 21:
         if "229" in data[:3]:
+            log.debug(data)
             p = re.compile('\d+')
             numbers = p.findall(data)
             portnum = int(numbers[len(numbers)-1])
