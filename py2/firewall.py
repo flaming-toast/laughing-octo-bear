@@ -21,9 +21,8 @@ class Firewall (object):
     """
     self.ftpAddress = {} # Key: Destaddress, Value: List of allowed ports
     self.timers = {} # key: (Destaddress, dataPorts), Value: Timer
+    self.buffer = {} # key: srcip, Value: the buffer
     log.debug("Firewall initialized.")
-    self.packet_string = "" # find FTP response code 227 or 229
-
   def _handle_ConnectionIn (self, event, flow, packet):
     """
     New connection event handler.
@@ -32,6 +31,8 @@ class Firewall (object):
     """
     if int(flow.dstport) >= 0 and int(flow.dstport) <= 1023:
       if int(flow.dstport) == 21:
+          if self.buffer.has_key((str(flow.dst), int(flow.srcport))):
+              del self.buffer[(str(flow.dst), int(flow.srcport))]
           log.debug("ftp connection")
           event.action.monitor_backward = True
           return
@@ -41,12 +42,15 @@ class Firewall (object):
         if self.ftpAddress.has_key(str(flow.dst)):
             if int(flow.dstport) in self.ftpAddress[str(flow.dst)]:
                 if self.timers.has_key((str(flow.dst), int(flow.dstport))):
-                    self.timers[(str(flow.dst), int(flow.dstport))].cancel()
-                    del self.timers[(str(flow.dst), int(flow.dstport))]
+                    if len(self.timers[(str(flow.dst), int(flow.dstport))]) >0:
+                        self.timers[(str(flow.dst), int(flow.dstport))][0].cancel()
+                        self.timers[(str(flow.dst), int(flow.dstport))].pop(0)
+                    if len(self.timers[(str(flow.dst), int(flow.dstport))]) ==0:
+                        del self.timers[(str(flow.dst), int(flow.dstport))]
                 self.ftpAddress[str(flow.dst)].remove(int(flow.dstport))
                 event.action.forward = True
-                log.debug("ftp data connection established on port: " + str(flow.dstport))
                 log.debug(self.ftpAddress)
+                log.debug("ftp data connection established on port: " + str(flow.dstport))
                 return
         event.action.deny = True
         
@@ -75,75 +79,83 @@ class Firewall (object):
     dstip = packet.payload.dstip
     dstip = str(dstip)
     data = str(packet.payload.payload.payload)
-   
-# process packets and find 227/229 response, account for fragmented packets.
-    match = re.match('\s*(22[79])\s*', data) # search the packet. If there's 227 or 229 we are interested in it.
-    if match: 
-	self.response = match.group() # save captured response code
-	log.debug("FOUND RESPONSE: " + self.response)
-	self.search_flag = True
-	self.packet_string += data # dump the packet into the temporary string
-	# inspect the temporary string, find the newlines
-
-    if (self.search_flag): 
-	if (re.search('[\r\n]*', data[data.find(self.response):])):
-		log.debug("PACKET STRING: " + self.packet_string) 
-		self.packet_string = "" # reset the string
-		self.search_flag = False
-        else: # we didn't find the newline after the response code, keep appending
-		self.packet_string += data
-		
+    
     if srcport == 21:
-        if "229" in data[:3]:
-            log.debug(data)
-            p = re.compile('\d+')
-            numbers = p.findall(data)
-            portnum = int(numbers[len(numbers)-1])
-            if self.ftpAddress.has_key(srcip):
-                self.ftpAddress[srcip].append(portnum)
+        if "\n" in data:
+            if self.buffer.has_key((srcip, dstport)):
+                temp = self.buffer[(srcip, dstport)]
+                data = temp + data
+            splitData = data.split("\n")
+            temp = splitData[-1]
+            self.buffer[(srcip, dstport)] = temp
+            i = 0
+            while i < len(splitData)-1:
+                temp = splitData[i]
+                if len(temp) > 8:
+                    self.checkPASVandEPSV(srcip, temp)
+                i+=1
+        else:
+            if self.buffer.has_key((srcip, dstport)):
+                temp = self.buffer[(srcip, dstport)]
+                temp = temp + data
+                self.buffer[(srcip, dstport)] = temp
             else:
-                self.ftpAddress[srcip]= []
-                self.ftpAddress[srcip].append(portnum)
-            self.setTimer(srcip, portnum)
-            log.debug(self.ftpAddress)
-            log.debug("229 successful")
-        if "227" in data[:3]:
-            p = re.compile('\d+')
-            numbers = p.findall(data)
-            log.debug(numbers)
-            octet1 = p.findall(data)[-2]
-            octet2 = p.findall(data)[-1]
-            portnum = int(octet1)*256 + int(octet2)
-            if self.ftpAddress.has_key(srcip):
-                self.ftpAddress[srcip].append(portnum)
-            else:
-                self.ftpAddress[srcip]= []
-                self.ftpAddress[srcip].append(portnum)
-            self.setTimer(srcip, portnum)
-            log.debug(self.ftpAddress)
-            log.debug("227 successful")
-	
+                self.buffet[(srcip, dstport)] = data
+        
+
     event.action.forward = True
     #log.debug("Monitored connection [" + srcip + ":"+ str(srcport) + "," + dstip + ":" + str(dstport))
     
     
-    
+  def checkPASVandEPSV(self, srcip, data):
+    if "229" in data[:3]:
+        log.debug(data)
+        p = re.compile('\d+')
+        numbers = p.findall(data)
+        portnum = int(numbers[len(numbers)-1])
+        if self.ftpAddress.has_key(srcip):
+            self.ftpAddress[srcip].append(portnum)
+        else:
+            self.ftpAddress[srcip]= []
+            self.ftpAddress[srcip].append(portnum)
+        self.setTimer(srcip, portnum)
+        log.debug(self.ftpAddress)
+        log.debug("229 successful")
+    if "227" in data[:3]:
+        log.debug(data)
+        p = re.compile('\d+')
+        numbers = p.findall(data)
+        octet1 = p.findall(data)[-2]
+        octet2 = p.findall(data)[-1]
+        portnum = int(octet1)*256 + int(octet2)
+        if self.ftpAddress.has_key(srcip):
+            self.ftpAddress[srcip].append(portnum)
+        else:
+            self.ftpAddress[srcip]= []
+            self.ftpAddress[srcip].append(portnum)
+        self.setTimer(srcip, portnum)
+        log.debug(self.ftpAddress)
+        log.debug("227 successful")
+        
   def setTimer(self, destAddress, dataPort):
      if self.timers.has_key((destAddress, dataPort)):
-         self.timers[(destAddress, dataPort)].cancel()
-         self.timers[(destAddress, dataPort)] = Timer(10.0, self.timeoutFunc, args=(destAddress, dataPort))
+         self.timers[(destAddress, dataPort)].append(Timer(10.0, self.timeoutFunc, args=(destAddress, dataPort)))
      else:
-         self.timers[(destAddress, dataPort)] = Timer(10.0, self.timeoutFunc, args=(destAddress, dataPort))
+         self.timers[(destAddress, dataPort)] = []
+         self.timers[(destAddress, dataPort)].append(Timer(10.0, self.timeoutFunc, args=(destAddress, dataPort)))
          
 
   def timeoutFunc(self, destAddress, dataPort):
       if self.timers.has_key((destAddress, dataPort)):
-          del self.timers[(destAddress, dataPort)]
+          if len(self.timers[(destAddress, dataPort)]) >0:
+              self.timers[(destAddress, dataPort)].pop(0)
+          if len(self.timers[(destAddress, dataPort)]) ==0:
+              del self.timers[(destAddress, dataPort)]
       if self.ftpAddress.has_key(destAddress):
           if dataPort in self.ftpAddress[destAddress]:
               self.ftpAddress[destAddress].remove(dataPort)
+      log.debug("timedout")
       log.debug(self.ftpAddress)
-      log.debug("timed-out")
       
     
 
